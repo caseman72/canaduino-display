@@ -1,0 +1,84 @@
+substitutions:
+  # Secrets - override via upload.sh
+  wifi_ssid: "PLACEHOLDER"
+  wifi_password: "PLACEHOLDER"
+  ota_password: "PLACEHOLDER"
+
+esphome:
+  name: display-monitor
+  friendly_name: Display Monitor
+
+esp32:
+  board: arduino_nano_esp32
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_LOG_COLORS: "n"
+
+wifi:
+  ssid: ${wifi_ssid}
+  password: ${wifi_password}
+  fast_connect: true
+
+api:
+
+ota:
+  platform: esphome
+  password: ${ota_password}
+
+logger:
+  level: INFO
+
+# I2C for OLED display
+# Canaduino A4/SDA -> A4 on Nano ESP32 -> GPIO 11
+# Canaduino A5/SCL -> A5 on Nano ESP32 -> GPIO 12
+i2c:
+  sda: 12
+  scl: 11
+  scan: true
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_large
+    size: 36
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 14
+
+# Voltage sensor on Canaduino A1 (A0 analog input, 0-10V range)
+# A0 on Nano ESP32 -> GPIO 1
+# Canaduino A0 has built-in divider for 0-10V input
+# DC 0-25V sensor module also divides by 5 before reaching Canaduino input
+# Calibrate with multimeter - apply known voltage, read raw ADC, update points
+sensor:
+  - platform: adc
+    pin: 1
+    name: "DC Voltage"
+    id: dc_voltage
+    attenuation: auto
+    update_interval: 5s
+    unit_of_measurement: "V"
+    accuracy_decimals: 1
+    filters:
+      - calibrate_linear:
+          - 0.072 -> 0.0     # Open (pass2: d=0.2V, m=0V)
+          - 0.420 -> 5.03    # 5V (pass2: d=5.0V, m=5.03V)
+          - 0.892 -> 9.98    # 10V (pass2: d=9.8V, m=9.98V)
+          - 1.123 -> 12.26   # 12V (pass2: d=12.0V, m=12.26V)
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 2
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    update_interval: 1s
+    lambda: |-
+      if (id(dc_voltage).has_state()) {
+        it.printf(64, -4, id(font_large), TextAlign::TOP_CENTER,
+                  "%.1fV", id(dc_voltage).state);
+      } else {
+        it.print(64, -4, id(font_large), TextAlign::TOP_CENTER, "---");
+      }
+      it.print(64, 58, id(font_small), TextAlign::BOTTOM_CENTER, "DC Voltage");
